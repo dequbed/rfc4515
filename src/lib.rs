@@ -9,8 +9,31 @@ use asnom::structures::{Tag, Sequence, OctetString, ExplicitTag};
 
 named!(filter <Tag>, delimited!(
     char!('('),
-    flat_map!(take_until_s!(")"), filtercomp),
+    take_until_delim,
     char!(')')));
+
+named!(take_until_delim <Tag>, alt!(
+    do_parse!(
+        ft: take_until_s!("(") >>
+        tv: many1!(delimited!(
+            char!('('),
+            take_until_delim,
+            char!(')')
+        )) >>
+        (Tag::Sequence(Sequence {
+                class: TagClass::Context,
+                inner: tv,
+                id: match ft {
+                    b"&" => 0,
+                    b"|" => 1,
+                    b"!" => 2,
+                    _ => { println!("{:?}", ft); 0 }
+                }
+        }))
+    )
+    |
+    flat_map!(take_until_s!(")"), item)
+));
 
 named!(filterlist <Vec<Tag> >, many1!(filter));
 
@@ -173,10 +196,12 @@ mod tests {
     fn not() {
         let f = &b"(!(cn=Tim Howes))"[..];
 
-        let tag = Tag::ExplicitTag(ExplicitTag {
+        let tag = Tag::Sequence(Sequence {
             class: TagClass::Context,
             id: 2,
-            inner: Box::new(Tag::Sequence(Sequence {
+            inner: vec![Tag::Sequence(Sequence {
+                class: TagClass::Context,
+                id: 3,
                 inner: vec![
                     Tag::OctetString(OctetString {
                         inner: vec![0x63, 0x6e],
@@ -187,12 +212,21 @@ mod tests {
                         .. Default::default()
                     })
                 ],
-                .. Default::default()
-            })),
+            })],
         });
 
         let o: IResult<&[u8], Tag> = super::filter(f);
         let left = Vec::new();
         assert_eq!(o, IResult::Done(&left[..], tag));
+    }
+
+    #[test]
+    fn and() {
+        let f = &b"(&(a=b)(b=c)(c=d))"[..];
+
+        let o = super::filter(f);
+        println!("{:?}", o);
+
+        assert!(false);
     }
 }
